@@ -1,0 +1,210 @@
+local DiscordLib = loadstring(game:HttpGet"https://raw.githubusercontent.com/dawid-scripts/UI-Libs/main/discord%20lib.txt")()
+
+local win = DiscordLib:Window("discord library")
+
+local serv = win:Server("Preview", "")
+
+local btns = serv:Channel("Buttons")
+local tgls = serv:Channel("Toggles")
+
+local smoothness = 0 -- Smoothness, makes the aimbot more legit. More smoothness = more legit
+local wallcheck_enabled = false -- Wallcheck, checks for a wall and if there is won't lock on the person. Set to true to turn on
+local teamcheck_enabled = false -- teamcheck, not always 100% accurate. Set to true to turn on
+local triggerbot_enabled = false -- Automatically shoots opponent for you
+local autoswitch_enabled = false -- Automatically switches to another person if the person you're locked on dies
+local players = game:GetService("Players")
+local userinputservice = game:GetService("UserInputService")
+local runservice = game:GetService("RunService")
+local cam = workspace.CurrentCamera
+local target = nil
+local lasttargetposition = nil
+local holdingrightclick = false
+
+local function isinfrontofplayer(target)
+    local mycharacter = players.LocalPlayer.Character
+    if not mycharacter or not mycharacter.PrimaryPart then
+        return false
+    end
+
+    local myposition = mycharacter.PrimaryPart.Position
+    local targetposition = target.Character.Head.Position
+    local directiontotarget = (targetposition - myposition).Unit
+    local lookdirection = mycharacter.PrimaryPart.CFrame.LookVector
+
+    return directiontotarget:Dot(lookdirection) > 0
+end
+
+local function isnotbehindwall(target)
+    if not wallcheck_enabled then
+        return true
+    end
+
+    local mycharacter = players.LocalPlayer.Character
+    if not mycharacter or not mycharacter.PrimaryPart then
+        return false
+    end
+
+    local myposition = mycharacter.PrimaryPart.Position
+    local targetposition = target.Character.Head.Position
+
+    local raycastparams = RaycastParams.new()
+    raycastparams.FilterDescendantsInstances = {mycharacter}
+    raycastparams.FilterType = Enum.RaycastFilterType.Blacklist
+    raycastparams.IgnoreWater = true
+
+    local direction = (targetposition - myposition).Unit * (targetposition - myposition).Magnitude
+    local result = workspace:Raycast(myposition, direction, raycastparams)
+
+    return not result or result.Instance:IsDescendantOf(target.Character)
+end
+
+local function isontheteam(target)
+    if not teamcheck_enabled then
+        return true
+    end
+    return target.Team ~= players.LocalPlayer.Team
+end
+
+local function createhighlight(player)
+    if esp_enabled and player.Character and player.Character:FindFirstChild("Head") then
+        if not player.Character:FindFirstChildOfClass("Highlight") then
+            local highlight = Instance.new("Highlight")
+            highlight.Parent = player.Character
+            highlight.Adornee = player.Character
+            highlight.FillColor = Color3.fromRGB(255, 0, 0)
+            highlight.OutlineColor = Color3.fromRGB(255, 0, 0)
+            highlight.FillTransparency = 0.75
+            highlight.OutlineTransparency = 0.2
+
+            local head = player.Character:FindFirstChild("Head")
+            if head then
+                local billboardgui = Instance.new("BillboardGui")
+                billboardgui.Parent = head
+                billboardgui.Adornee = head
+                billboardgui.Size = UDim2.new(1, 0, 1, 0)
+                billboardgui.StudsOffset = Vector3.new(0, 2, 0)
+
+                local nametag = Instance.new("TextLabel")
+                nametag.Parent = billboardgui
+                nametag.Size = UDim2.new(1.5, 0, 1.5, 0)
+                nametag.BackgroundTransparency = 1
+                nametag.Text = player.DisplayName
+                nametag.TextColor3 = Color3.fromRGB(255, 0, 0)
+                nametag.TextScaled = true
+                nametag.Font = Enum.Font.GothamBold
+                nametag.TextSize = 24
+            end
+        end
+    end
+end
+
+local function getclosestplayer()
+    local mouse = players.LocalPlayer:GetMouse()
+    local closesthomie = nil
+    local closestdist = math.huge
+
+    for _, homie in pairs(players:GetPlayers()) do
+        if homie ~= players.LocalPlayer and homie.Character and homie.Character:FindFirstChild("Head") then
+            if isinfrontofplayer(homie) and isnotbehindwall(homie) and isontheteam(homie) then
+                local head = homie.Character.Head
+                local headpos, onscreen = cam:WorldToScreenPoint(head.Position)
+
+                if onscreen then
+                    local mousedist = (Vector2.new(mouse.X, mouse.Y) - Vector2.new(headpos.X, headpos.Y)).Magnitude
+                    local playerdist = (players.LocalPlayer.Character.PrimaryPart.Position - head.Position).Magnitude
+                    local combineddist = mousedist + playerdist
+
+                    if combineddist < closestdist then
+                        closesthomie = homie
+                        closestdist = combineddist
+                    end
+                end
+            end
+        end
+    end
+
+    return closesthomie
+end
+
+local function applyesp()
+    for _, homie in pairs(players:GetPlayers()) do
+        if homie ~= players.LocalPlayer and isontheteam(homie) then
+            createhighlight(homie)
+        end
+    end
+end
+
+userinputservice.InputBegan:Connect(
+    function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton2 then
+            holdingrightclick = true
+            target = getclosestplayer()
+            lasttargetposition = target and target.Character and target.Character.PrimaryPart.Position
+        end
+    end
+)
+
+userinputservice.InputEnded:Connect(
+    function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton2 then
+            holdingrightclick = false
+            target = nil
+            lasttargetposition = nil
+        end
+    end
+)
+
+runservice.RenderStepped:Connect(
+    function()
+        if
+            autoswitch_enabled and holdingrightclick and
+                (not target or not target.Character or not target.Character:FindFirstChild("Head"))
+         then
+            target = getclosestplayer()
+            lasttargetposition = target and target.Character and target.Character.PrimaryPart.Position
+        end
+
+        if target and target.Character and target.Character:FindFirstChild("Head") then
+            local targetpos = target.Character.Head.Position
+            local mycharacter = players.LocalPlayer.Character
+
+            if not mycharacter or not mycharacter.PrimaryPart then
+                return
+            end
+
+            if lasttargetposition and (targetpos - lasttargetposition).Magnitude > 10 then
+                target = nil
+            else
+                lasttargetposition = targetpos
+                local currentcframe = cam.CFrame
+                local targetcframe = CFrame.new(currentcframe.Position, targetpos)
+                cam.CFrame = currentcframe:Lerp(targetcframe, 1 - smoothness)
+
+                if triggerbot_enabled then
+                    mouse1press()
+                    wait(0.01)
+                    mouse1release()
+                end
+            end
+        end
+    end
+)
+tgls:Toggle("Wallcheck",false, function(bool)
+  local wallcheck_enabled = bool
+end)
+tgls:Toggle("Aimbot",false, function(bool)
+if bool == true then
+  holdingrightclick = true
+            target = getclosestplayer()
+            lasttargetposition = target and target.Character and target.Character.PrimaryPart.Position
+else
+ holdingrightclick = false
+            target = nil
+            lasttargetposition = nil
+end)
+tgls:Toggle("team check",false, function(bool)
+local teamcheck_enabled = bool
+end)
+tgls:Toggle("Auto-Farm",false, function(bool)
+local triggerbot_enabled = bool
+end)
